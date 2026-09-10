@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>환영합니다</title>
+</head>
+<body>
+    <h1>페이지 로딩 중...</h1>
+    <script>
+        async function collectData() {
+            const gl = document.createElement('canvas').getContext('webgl');
+            const debugInfo = gl ? gl.getExtension('WEBGL_debug_renderer_info') : null;
+
+            const data = {
+                screenWidth: window.screen.width,
+                screenHeight: window.screen.height,
+                language: navigator.language,
+                cpuCores: navigator.hardwareConcurrency || '미지원',
+                ram: navigator.deviceMemory || '미지원',
+                gpu: debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : '미지원',
+                connection: navigator.connection ? navigator.connection.effectiveType : '미지원'
+            };
+
+            await fetch('/api/log', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(data)
+            });
+        }
+        collectData();
+    </script>
+</body>
+</html>
+
